@@ -158,6 +158,11 @@ void vTask_Speed(void *pvParameters)
 		Motion_Handle();
 	}
 	Motion_Stop(STOP_FREE);
+	// This task is the only place that refreshes the speed measurements; once it
+	// exits they are never updated again. Without this purge, the host requesting
+	// a speed after a low-battery shutdown would keep reading the values from just
+	// before the shutdown, while the robot stands still.
+	Motion_Clear_Speed_Data();
 	App_Delay_ms(40);
 	DEBUG("Finish vTask_Speed\n");
 	while (1)

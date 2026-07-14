@@ -83,6 +83,22 @@ void Send_Request_Data(void)
 		g_Request_Flag = 0;
 		break;
 	}
+
+	/* Read the raw speed of the four motors */
+	case FUNC_REPORT_MOTOR_RAW:
+	{
+		Motion_Send_Motor_Speed_Raw();
+		g_Request_Flag = 0;
+		break;
+	}
+
+	/* Read the low-pass filtered speed of the four motors */
+	case FUNC_REPORT_MOTOR_LPF:
+	{
+		Motion_Send_Motor_Speed_LPF();
+		g_Request_Flag = 0;
+		break;
+	}
 	/* Read the bus servo position */
 	case FUNC_UART_SERVO:
 	{

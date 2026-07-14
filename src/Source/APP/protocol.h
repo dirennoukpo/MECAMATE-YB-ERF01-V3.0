@@ -17,6 +17,11 @@
 #define FUNC_RGB                  (0x05)
 #define FUNC_RGB_EFFECT           (0x06)
 
+/* Speed of the four motors, in mm/s. RAW is the value computed directly from the
+   encoders; LPF is the same value after a first-order low-pass filter. */
+#define FUNC_REPORT_MOTOR_RAW     (0x08)
+#define FUNC_REPORT_MOTOR_LPF     (0x09)
+
 #define FUNC_REPORT_SPEED         (0x0A)
 #define FUNC_REPORT_MPU_RAW       (0x0B)
 #define FUNC_REPORT_IMU_ATT       (0x0C)

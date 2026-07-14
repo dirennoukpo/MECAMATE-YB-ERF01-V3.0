@@ -20,6 +20,13 @@
 #define DISTANCE_CIRCLE      (0.204203)
 
 
+// First-order low-pass filter coefficient for the motor speeds.
+// alpha = Te / (tau + Te), where Te = 10 ms is the call period of Motion_Handle.
+// 0.2f gives a time constant tau = 40 ms, i.e. a cutoff around 4 Hz. The smaller
+// the value, the stronger the filtering and the slower the response.
+#define MOTOR_SPEED_LPF_ALPHA        (0.2f)
+
+
 // Stop mode: STOP_FREE means free stop (coast), STOP_BRAKE means brake.
 typedef enum _stop_mode {
     STOP_FREE = 0,
@@ -88,10 +95,14 @@ float Motion_Get_APB(void);
 
 
 void Motion_Get_Motor_Speed(float* speed);
+void Motion_Get_Motor_Speed_LPF(float* speed);
+void Motion_Clear_Speed_Data(void);
 
 
 void Motion_Send_Data(void);
 void Motion_Send_Car_Type(void);
+void Motion_Send_Motor_Speed_Raw(void);
+void Motion_Send_Motor_Speed_LPF(void);
 
 
 #endif

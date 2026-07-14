@@ -13,6 +13,9 @@
 #include "icm20948.h"
 #include "bsp_mpu9250.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 
 // Encoder data before/after 10 ms
 int g_Encoder_All_Now[MAX_MOTOR] = {0};
@@ -24,6 +27,9 @@ uint8_t g_start_ctrl = 0;
 
 car_data_t car_data;
 motor_data_t motor_data;
+
+// Speed of the four motors after the first-order low-pass filter, in mm/s.
+static float g_motor_speed_lpf[MAX_MOTOR] = {0};
 
 uint8_t g_yaw_adjust = 0;
 car_type_t g_car_type = CAR_MECANUM;
@@ -92,8 +98,50 @@ void Motion_Get_Motor_Speed(float* speed)
     for (int i = 0; i < 4; i++)
     {
         speed[i] = motor_data.speed_mm_s[i];
-        
+
     }
+}
+
+// Get the low-pass filtered motor speed
+void Motion_Get_Motor_Speed_LPF(float* speed)
+{
+    for (int i = 0; i < MAX_MOTOR; i++)
+    {
+        speed[i] = g_motor_speed_lpf[i];
+    }
+}
+
+// Clear every speed measurement.
+// The speed data is only refreshed inside vTask_Speed; once that task stops
+// running (on a low-battery shutdown, for instance) the host would keep reading
+// the stale pre-shutdown values, so we must actively zero them here.
+// Do NOT move this into Motion_Stop(): on a normal brake the wheels are still
+// spinning, and zeroing there would report a speed that is simply false.
+//
+// LOCKING: this function must NOT use taskENTER_CRITICAL(). It is reachable from
+// interrupt context: Motion_Set_Car_Type() calls it, and Motion_Set_Car_Type() is
+// reached from Upper_CAN_Execute_Command(), which runs inside the CAN RX ISR
+// (USB_LP_CAN1_RX0_IRQHandler). taskENTER_CRITICAL() is a FreeRTOS API call and
+// is forbidden from an ISR whose priority sits above
+// configMAX_SYSCALL_INTERRUPT_PRIORITY -- and the CAN ISR does (NVIC 0x90 vs the
+// 0xBF threshold). This is the same class of bug already fixed in __malloc_lock
+// (src/port_gcc/syscalls.c).
+// portSET/CLEAR_INTERRUPT_MASK_FROM_ISR save and restore the previous BASEPRI:
+// they are valid in task context, in ISR context, and before the scheduler starts.
+void Motion_Clear_Speed_Data(void)
+{
+    uint32_t saved_basepri = portSET_INTERRUPT_MASK_FROM_ISR();
+
+    for (int i = 0; i < MAX_MOTOR; i++)
+    {
+        motor_data.speed_mm_s[i] = 0;
+        g_motor_speed_lpf[i] = 0;
+    }
+    car_data.Vx = 0;
+    car_data.Vy = 0;
+    car_data.Vz = 0;
+
+    portCLEAR_INTERRUPT_MASK_FROM_ISR(saved_basepri);
 }
 
 
@@ -267,13 +315,17 @@ void Motion_Get_Speed(car_data_t* car)
         break;
     }
 
+    // Refresh the speed data whether or not the car is under control, otherwise
+    // the host reads stale values as soon as the robot stops or is pushed by hand.
+    for (i = 0; i < MAX_MOTOR; i++)
+    {
+        motor_data.speed_mm_s[i] = speed_mm[i];
+        // First-order low-pass filter: y[n] = y[n-1] + alpha * (x[n] - y[n-1])
+        g_motor_speed_lpf[i] += MOTOR_SPEED_LPF_ALPHA * (speed_mm[i] - g_motor_speed_lpf[i]);
+    }
+
     if (g_start_ctrl)
     {
-        for (i = 0; i < MAX_MOTOR; i++)
-        {
-            motor_data.speed_mm_s[i] = speed_mm[i];
-        }
-        
         #if ENABLE_YAW_ADJUST
         if (g_yaw_adjust)
         {
@@ -333,6 +385,11 @@ void Motion_Set_Car_Type(car_type_t car_type)
     if (car_type >= CAR_TYPE_MAX) return;
     if (g_car_type == car_type) return;
     g_car_type = car_type;
+    // Changing the car type changes both the encoder pulse coefficient
+    // (Motion_Get_Circle_Pulse) and the accumulation sign (Encoder_Update_Count).
+    // The history accumulated in the filter is expressed on the old scale, and may
+    // even carry the opposite sign, so it must be cleared and restarted.
+    Motion_Clear_Speed_Data();
     if (g_car_type == CAR_ACKERMAN)
     {
         PwmServo_Set_Angle(PWMServo_ID_S1, Ackerman_Get_Default_Angle());
@@ -467,6 +524,76 @@ void Motion_Send_Car_Type(void)
 	}
 	data_buffer[LEN_BUF-1] = checknum;
 	USART1_Send_ArrayU8(data_buffer, sizeof(data_buffer));
+}
+
+
+// Saturate the speed to the int16 range, so that an aberrant encoder jump cannot
+// wrap the value around.
+static int16_t Motion_Speed_Limit_Int16(float speed)
+{
+	if (speed >= 32767.0f) return 32767;
+	if (speed <= -32768.0f) return -32768;
+	return (int16_t)speed;
+}
+
+// Send the speed of the four motors to the host, in mm/s. `func` selects between
+// the raw and the filtered speed.
+// The sign convention is the same as for Vx/Vy/Vz: all four wheels are positive
+// when the robot moves forward.
+static void Motion_Send_Motor_Speed(uint8_t func, const float* speed)
+{
+    #define LEN_MOTOR_SPEED        13
+	uint8_t data_buffer[LEN_MOTOR_SPEED] = {0};
+	uint8_t i, checknum = 0;
+	float speed_now[MAX_MOTOR] = {0};
+
+	// This function runs in vTask_Control, while vTask_Speed rewrites the speed
+	// arrays every 10 ms and can preempt it at any time -- the two tasks share the
+	// same effective priority (the 10/9/8/7 values passed to xTaskCreate are
+	// clamped to 4 by configMAX_PRIORITIES = 5), so they time-slice against each
+	// other on the tick. Take a snapshot under a critical section first, otherwise
+	// a single frame could mix wheels 0-1 from one sampling period with wheels 2-3
+	// from the next -- with a valid checksum, hence undetectable by the host.
+	//
+	// taskENTER_CRITICAL() is legitimate HERE (unlike in Motion_Clear_Speed_Data):
+	// this function is only ever called from Send_Request_Data(), which is only
+	// called from vTask_Control -- task context, never an ISR.
+	taskENTER_CRITICAL();
+	for (i = 0; i < MAX_MOTOR; i++)
+	{
+		speed_now[i] = speed[i];
+	}
+	taskEXIT_CRITICAL();
+
+	data_buffer[0] = PTO_HEAD;
+	data_buffer[1] = PTO_DEVICE_ID-1;
+	data_buffer[2] = LEN_MOTOR_SPEED-2; // Length
+	data_buffer[3] = func;              // Function byte
+	for (i = 0; i < MAX_MOTOR; i++)
+	{
+		int16_t value = Motion_Speed_Limit_Int16(speed_now[i]);
+		data_buffer[4 + i*2] = value & 0xff;
+		data_buffer[5 + i*2] = (value >> 8) & 0xff;
+	}
+
+	for (i = 2; i < LEN_MOTOR_SPEED-1; i++)
+	{
+		checknum += data_buffer[i];
+	}
+	data_buffer[LEN_MOTOR_SPEED-1] = checknum;
+	USART1_Send_ArrayU8(data_buffer, sizeof(data_buffer));
+}
+
+// Send the raw speed of the four motors to the host controller
+void Motion_Send_Motor_Speed_Raw(void)
+{
+	Motion_Send_Motor_Speed(FUNC_REPORT_MOTOR_RAW, motor_data.speed_mm_s);
+}
+
+// Send the low-pass filtered speed of the four motors to the host controller
+void Motion_Send_Motor_Speed_LPF(void)
+{
+	Motion_Send_Motor_Speed(FUNC_REPORT_MOTOR_LPF, g_motor_speed_lpf);
 }
 
 
