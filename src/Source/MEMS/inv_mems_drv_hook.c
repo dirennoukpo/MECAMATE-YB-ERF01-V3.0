@@ -26,6 +26,10 @@ int inv_serial_interface_write_hook(uint16_t reg, uint32_t length, uint8_t *data
 
     ICM20948_CS = 1;
 
+    /* Boot progress: the DMP image (14250 bytes) goes through here. Called after CS
+       is released, so the OLED refresh cannot land in the middle of a transaction. */
+    Bsp_Boot_Progress_Bytes(length);
+
     return result;
 }
 
@@ -44,6 +48,10 @@ int inv_serial_interface_read_hook(uint16_t reg, uint32_t length, uint8_t *data)
     }
 
     ICM20948_CS = 1;
+
+    /* Boot progress: the DMP image is read back to verify it, so this path carries
+       as many bytes as the write path. */
+    Bsp_Boot_Progress_Bytes(length);
 
     return result;
 }
@@ -73,6 +81,10 @@ void inv_sleep(unsigned long mSecs)
     }
     else
     {
+        /* Boot progress: the ICM self-test spends 8.2 s of its 8.6 s right here.
+           This is the single biggest contributor to the boot time, which is why the
+           percentage is driven from it rather than from milestones. */
+        Bsp_Boot_Progress_Sleep(mSecs);
         delay_ms(mSecs);
     }
 }

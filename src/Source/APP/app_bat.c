@@ -135,13 +135,20 @@ uint8_t Bat_Show_LED_Handle(uint8_t enable_beep)
 		static uint8_t alarm = 1;
 		uint8_t battery_state = Bat_State();
 		bat_led_state = 0;
+		// NOTE: the OLED alarm texts below are commented out on request -- the screen is
+		// dedicated to the battery voltage and must show nothing else. The ALARMS
+		// THEMSELVES ARE UNTOUCHED: the buzzer still sounds (Bsp_Led_Show_*), the RGB
+		// strip still turns red on over-voltage, and the car still brakes.
+		// Since a low battery drives g_system_enable to 0, vTask_OLED leaves its loop and
+		// the screen freezes on the last voltage displayed -- which is arguably more
+		// useful than the word "Battery Low": you get to read how low it actually got.
 		if (battery_state == BATTERY_LOW)
 		{
 			Bsp_Led_Show_Low_Battery(enable_beep);
 			if (alarm)
 			{
 				alarm = 0;
-				OLED_Draw_Line("Battery Low", 2, true, true);
+				// OLED_Draw_Line("Battery Low", 2, true, true);
 			}
 			Motion_Stop(STOP_BRAKE);
 		}
@@ -154,8 +161,8 @@ uint8_t Bat_Show_LED_Handle(uint8_t enable_beep)
 				app_rgb_set_effect(0, 0);
 				RGB_Set_Color(RGB_CTRL_ALL, 255, 0, 0);
 				RGB_Update();
-				OLED_Draw_Line("Battery", 2, true, false);
-				OLED_Draw_Line("Over Voltage", 3, false, true);
+				// OLED_Draw_Line("Battery", 2, true, false);
+				// OLED_Draw_Line("Over Voltage", 3, false, true);
 			}
 			Motion_Stop(STOP_BRAKE);
 		}

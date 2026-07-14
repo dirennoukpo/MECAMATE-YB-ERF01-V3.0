@@ -77,4 +77,26 @@ void Bsp_Long_Beep_Alarm(void);
 
 void Bsp_Reset_MCU(void);
 
+
+/* ---------------------------------------------------------------------------
+ * Boot progress, shown on the OLED as a large percentage (0% -> 100%).
+ *
+ * The board takes about 11.5 s to boot, and 95% of that is the ICM20948 init:
+ * ~2.2 s loading the DMP firmware over SPI2 (14250 bytes written, then read back
+ * to verify), then ~8.6 s of self-test, of which 8.2 s is pure sleeping.
+ * Measured on the board, not guessed.
+ *
+ * A milestone-based percentage would sit frozen at one value for 8.6 s, which is
+ * exactly the problem we are trying to fix. So the progress is driven by an
+ * ESTIMATED ELAPSED TIME, fed from the two things that actually consume the boot:
+ *   - Bsp_Boot_Progress_Bytes(): every byte moved over SPI2 by the InvenSense
+ *     driver (~0.0765 ms per byte, measured);
+ *   - Bsp_Boot_Progress_Sleep(): every millisecond the driver spends in inv_sleep().
+ * Both hooks live in Source/MEMS/inv_mems_drv_hook.c.
+ * ------------------------------------------------------------------------- */
+void Bsp_Boot_Progress_Begin(void);
+void Bsp_Boot_Progress_Bytes(uint32_t bytes);
+void Bsp_Boot_Progress_Sleep(uint32_t ms);
+void Bsp_Boot_Progress_End(void);
+
 #endif

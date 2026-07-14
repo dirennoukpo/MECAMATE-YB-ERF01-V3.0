@@ -1,4 +1,4 @@
-#include "icm20948.h"
+﻿#include "icm20948.h"
 #include "app.h"
 #include "bsp.h"
 #include "stdio.h"
@@ -1609,7 +1609,6 @@ int ICM_20948_Init(void)
     }
 
     if(usart_dbg)printf("address = 0x%02X\r\n", rx);
-	
     inv_set_chip_to_body_axis_quaternion(ACCEL_GYRO_ORIENTATION, 0.0);
     result |= inv_initialize_lower_driver(SERIAL_INTERFACE_I2C, 0);
 	if (result)
@@ -1621,20 +1620,20 @@ int ICM_20948_Init(void)
     {
         if(usart_dbg)printf("compass_id error.\r\n");
     }
-	
+
     self_test();
     result |= dmp_set_bias(dmp_bias);
     if (result)
     {
         if(usart_dbg)printf("dmp_set_bias error.\r\n");
     }
-	
+
 	result |= dmp_reset_fifo();
     if (result)
     {
         if(usart_dbg)printf("dmp_reset_fifo error.\r\n");
     }
-	
+
 	hal.report ^= PRINT_ACCEL;
 	result |= inv_enable_sensor(ANDROID_SENSOR_ACCELEROMETER, !!(hal.report & PRINT_ACCEL));
 	if (result)

@@ -84,7 +84,16 @@ void SSD1306_UpdateScreen(void)
 {
     uint8_t m;
 
-    for (m = 0; m < 8; m++)
+    // The loop used to be hard-coded to 8 pages, i.e. 1024 bytes pushed over the
+    // bit-banged I2C bus. But this panel is 128x32, so it only has
+    // SSD1306_HEIGHT / 8 = 4 pages, and SSD1306_Buffer is only
+    // SSD1306_WIDTH * SSD1306_HEIGHT / 8 = 512 bytes long.
+    //
+    // Pages 4..7 therefore read 512 bytes PAST THE END of SSD1306_Buffer (an
+    // out-of-bounds read of whatever sits next in .bss) and sent them to rows the
+    // panel does not even display. Bounding the loop to the real page count fixes
+    // the overrun and halves every screen refresh.
+    for (m = 0; m < (SSD1306_HEIGHT / 8); m++)
     {
         SSD1306_WRITECOMMAND(0xB0 + m);
         SSD1306_WRITECOMMAND(0x00);

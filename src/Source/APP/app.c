@@ -80,7 +80,8 @@ void App_Test_Mode_Init(void)
 	CAN_RX_Beep(0);
 	Motion_Stop(1);
 	UartServo_Ctrl(0xFE, 2000, 100);
-	OLED_Show_Test_Mode();
+	// Test-mode screen ("Version / Test Mode") commented out on request.
+	// OLED_Show_Test_Mode();
 }
 
 
@@ -127,6 +128,10 @@ void App_Init(void)
 
 	CAN_RX_Beep(1);
 	g_system_init = 1;
+
+	// Everything slow is done. Show 100%; vTask_OLED takes over with the voltage as
+	// soon as the scheduler starts.
+	Bsp_Boot_Progress_End();
 }
 
 // Logic handling, called once every 10MS
@@ -283,13 +288,40 @@ void vTask_Auto_Report(void *pvParameters)
 	}
 }
 
-/* OLED display task */
+/* OLED display task.
+ * The screen is now dedicated to ONE thing: the battery voltage, in large
+ * characters (Font_16x26), e.g. "12.6V". Every other display -- the boot splash,
+ * the IMU attitude, the motor speeds, the bus servo state, the test-mode screens --
+ * is commented out below, on request. Nothing has been deleted: re-enabling any of
+ * them is a matter of uncommenting.
+ *
+ * Note that the voltage no longer depends on the test mode. The old
+ * OLED_FLAG_VOLTAGE branch only displayed it when Bsp_Get_TestMode() == MODE_TEST
+ * and printed "Mode Error" otherwise, which is exactly what you do NOT want from a
+ * battery gauge.
+ */
 void vTask_OLED(void *pvParameters)
 {
-	OLED_Show_CarType(Motion_Get_Car_Type(), VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
+	// OLED_Show_CarType(Motion_Get_Car_Type(), VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH);
+
+	// Hand over from the boot percentage to the voltage IMMEDIATELY. Starting the
+	// loop with g_oled_count at 0 would leave 100% on screen for a further second,
+	// on top of a boot that is already long enough.
+	g_oled_count = 100;
+
 	while (System_Enable())
 	{
 		g_oled_count++;
+
+		// Refresh once per second: the task loops every 10 ms, and a full screen
+		// update is 512 bytes pushed over the bit-banged I2C bus, which is not free.
+		if (g_oled_count >= 100)
+		{
+			g_oled_count = 0;
+			OLED_Show_Voltage_Big(Bat_Voltage_Z10());
+		}
+
+		/* ---- ALL OTHER DISPLAYS, COMMENTED OUT ON REQUEST ----------------------
 		switch (g_oled_flag)
 		{
 		case OLED_FLAG_NO_DISPLAY:
@@ -385,6 +417,8 @@ void vTask_OLED(void *pvParameters)
 			break;
 		}
 		}
+		---- end of the commented-out displays -------------------------------- */
+
 		App_Delay_ms(10);
 	}
 	App_Delay_ms(20);

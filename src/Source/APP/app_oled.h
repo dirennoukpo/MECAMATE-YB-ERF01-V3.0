@@ -1,4 +1,4 @@
-#ifndef __APP_OLED_H__
+﻿#ifndef __APP_OLED_H__
 #define __APP_OLED_H__
 #include "stdbool.h"
 #include "stm32f10x.h"
@@ -22,6 +22,8 @@ void OLED_Draw_Line(char *data, uint8_t line, bool clear, bool refresh);
 
 void OLED_Show_CarType(uint8_t car_type, uint8_t v_major, uint8_t v_minor, uint8_t v_patch);
 void OLED_Show_Voltage(uint16_t bat_voltage);
+void OLED_Show_Voltage_Big(uint16_t bat_voltage);
+void OLED_Show_Percent_Big(uint8_t percent);
 void OLED_Show_IMU_Attitude(float yaw, float roll, float pitch);
 void OLED_Show_YAW(float yaw);
 void OLED_Show_Test_Mode(void);

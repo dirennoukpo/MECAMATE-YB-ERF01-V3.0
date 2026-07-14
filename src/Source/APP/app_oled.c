@@ -40,6 +40,19 @@ void OLED_Draw_Line(char *data, uint8_t line, bool clear, bool refresh)
     }
 }
 
+/* Write a string with an explicit font. OLED_Draw_String() hard-codes Font_7x10,
+   which is too small for the battery voltage read at a glance. */
+static void OLED_Draw_String_Font(char *data, uint8_t x, uint8_t y, FontDef_t *font,
+                                  bool clear, bool refresh)
+{
+#if ENABLE_OLED
+    if (clear) OLED_Clear();
+    SSD1306_GotoXY(x, y);
+    SSD1306_Puts(data, font, SSD1306_COLOR_WHITE);
+    if (refresh) OLED_Refresh();
+#endif
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -88,6 +101,52 @@ void OLED_Show_Voltage(uint16_t bat_voltage)
     char text[20];
     sprintf(text, "Voltage:%.1fV", bat_voltage/10.0);
     OLED_Draw_Line(text, 2, true, true);
+}
+
+// OLED显示电池电压，大字体，例如 "12.6V"。
+// Display the battery voltage in large characters, e.g. "12.6V".
+// bat_voltage is the voltage x10 (what Bat_Voltage_Z10() returns): 126 means 12.6 V.
+void OLED_Show_Voltage_Big(uint16_t bat_voltage)
+{
+    // "999.9V" + NUL = 7, so 8 is enough whatever the ADC reads.
+    char text[8];
+    uint8_t width, x, y;
+
+    // Formatted with integers ON PURPOSE, not with sprintf("%.1fV", v/10.0).
+    // The float path of newlib (_printf_float -> _dtoa_r -> _Balloc) calls malloc and
+    // eats several hundred bytes of stack. Keeping the OLED task free of any %f also
+    // removes it from the list of concurrent users of newlib's non-reentrant
+    // floating-point state.
+    sprintf(text, "%u.%uV", (unsigned)(bat_voltage / 10), (unsigned)(bat_voltage % 10));
+
+    // Center it. Font_16x26 is 16 px wide per character on a 128 px wide screen,
+    // and 26 px tall on a 32 px tall screen.
+    width = (uint8_t)(strlen(text) * Font_16x26.FontWidth);
+    x = (width >= SSD1306_WIDTH) ? 0 : (uint8_t)((SSD1306_WIDTH - width) / 2);
+    y = (uint8_t)((SSD1306_HEIGHT - Font_16x26.FontHeight) / 2);
+
+    OLED_Draw_String_Font(text, x, y, &Font_16x26, true, true);
+}
+
+// OLED显示启动进度，大字体，例如 "80%"。
+// Display the boot progress in large characters, e.g. "80%".
+// Same font and same centering as the voltage, so the screen does not jump when the
+// progress reaches 100% and hands over to the voltage display.
+void OLED_Show_Percent_Big(uint8_t percent)
+{
+    char text[8];
+    uint8_t width, x, y;
+
+    if (percent > 100) percent = 100;
+
+    // Integer formatting, no %f: keeps the boot path away from newlib's float engine.
+    sprintf(text, "%u%%", (unsigned)percent);
+
+    width = (uint8_t)(strlen(text) * Font_16x26.FontWidth);
+    x = (width >= SSD1306_WIDTH) ? 0 : (uint8_t)((SSD1306_WIDTH - width) / 2);
+    y = (uint8_t)((SSD1306_HEIGHT - Font_16x26.FontHeight) / 2);
+
+    OLED_Draw_String_Font(text, x, y, &Font_16x26, true, true);
 }
 
 // OLED显示姿态角
