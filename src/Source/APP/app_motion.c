@@ -177,6 +177,36 @@ uint8_t Motion_Get_Yaw_Adjust(void)
 
 
 // Control the car motion, Motor_X=[-3600, 3600], out of range is invalid.
+// Open-loop PWM control: write the four PWM values AND hand control back to the host.
+//
+// This is what FUNC_MOTOR (the host's set_motor()) must call, never Motion_Set_Pwm()
+// directly. Reason: g_start_ctrl stays at 1 after ANY set_car_motion() / set_car_run()
+// (or SBUS, or CAN) command, and while it is 1, Motion_Handle() rewrites all four PWM
+// registers every 10 ms with the on-board PID's output. An open-loop command written
+// underneath it therefore survives for at most 10 ms before being silently overwritten.
+//
+// Measured on the bench, before this function existed:
+//     reset_car_state() + set_motor(100 %)          -> 795 mm/s   (the real maximum)
+//     set_car_motion(0.1,0,0) then set_motor(100 %) -> 100 mm/s   (the PID won)
+//
+// The PID is also cleared on the way out, so that a later set_car_motion() restarts
+// from a zeroed integrator instead of resuming with a stale pwm_output.
+//
+// NOTE: this is a deliberate deviation from the stock Yahboom firmware. It matches
+// what the API always claimed to do -- the Python docstring for set_motor() reads
+// "Control PWM pulse of motor to control speed (speed measurement without encoder)",
+// i.e. open loop. The stock behaviour contradicted its own documentation.
+void Motion_Set_Pwm_Open_Loop(int16_t Motor_1, int16_t Motor_2, int16_t Motor_3, int16_t Motor_4)
+{
+    if (g_start_ctrl)
+    {
+        g_start_ctrl = 0;
+        g_yaw_adjust = 0;
+        PID_Clear_Motor(MAX_MOTOR);
+    }
+    Motion_Set_Pwm(Motor_1, Motor_2, Motor_3, Motor_4);
+}
+
 void Motion_Set_Pwm(int16_t Motor_1, int16_t Motor_2, int16_t Motor_3, int16_t Motor_4)
 {
     if (Motor_1 >= -MOTOR_MAX_PULSE && Motor_1 <= MOTOR_MAX_PULSE)

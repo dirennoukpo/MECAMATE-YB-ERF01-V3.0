@@ -236,44 +236,50 @@ void vTask_Control(void *pvParameters)
 void vTask_Auto_Report(void *pvParameters)
 {
 	App_Delay_ms(AUTO_SEND_TIMEOUT);
-	uint16_t report_count = 0;
+	// Free-running millisecond phase, wrapped at 200 ms (LCM of the 10/20/200 ms periods
+	// below) so the modulo cadences stay exact. The UART send is DMA (ENABLE_USART1_DMA)
+	// and returns without blocking at these spacings, so one iteration is ~1 ms.
+	//
+	// PORT NOTE -- rates retuned for the MecaMate ROS driver (mecamate_hardware), the ONLY
+	// consumer of the Rosmaster:
+	//   0x09 motor speed (LPF)  100 Hz -- driver reads it from cache (no request); must be
+	//                                     fresh every 10 ms for the 50 Hz control loop.
+	//   0x0D encoder counts      50 Hz -- cumulative position; matches the control loop.
+	//   motion + battery          5 Hz -- only the battery byte is read; keeps the host's
+	//                                     low-battery soft-stop reactive.
+	//   IMU 0x0B/0x0C            OFF    -- the driver's IMU is the muto's; ENABLE_IMU_AUTOREPORT.
+	uint16_t ms = 0;
 	while (System_Enable())
 	{
 		if (g_Auto_Report)
 		{
-			if (report_count == 1)
+			if (ms % 10 == 0)
 			{
-				Motion_Send_Data();
+				Motion_Send_Motor_Speed_LPF();   /* 0x09, 100 Hz */
 			}
-			else if (report_count == 11)
+			if (ms % 20 == 5)
 			{
-				if (Bsp_Get_Imu_Type() == IMU_TYPE_ICM20948)
-				{
-					ICM20948_Send_Raw_Data();
-				}
-				else if (Bsp_Get_Imu_Type() == IMU_TYPE_MPU9250)
-				{
-					MPU9250_Send_Raw_Data();
-				}
+				Encoder_Send_Count_Now();        /* 0x0D, 50 Hz, offset so it never shares an ms */
 			}
-			else if (report_count == 21)
+			if (ms == 13)
 			{
-				if (Bsp_Get_Imu_Type() == IMU_TYPE_ICM20948)
-				{
-					ICM20948_Send_Attitude_Data();
-				}
-				else if (Bsp_Get_Imu_Type() == IMU_TYPE_MPU9250)
-				{
-					MPU9250_Send_Attitude_Data();
-				}
+				Motion_Send_Data();              /* motion + battery, 5 Hz */
 			}
-			else if (report_count == 31)
+			#if ENABLE_IMU_AUTOREPORT
+			if (ms % 20 == 12)
 			{
-				Encoder_Send_Count_Now();
+				if (Bsp_Get_Imu_Type() == IMU_TYPE_ICM20948)     ICM20948_Send_Raw_Data();
+				else if (Bsp_Get_Imu_Type() == IMU_TYPE_MPU9250) MPU9250_Send_Raw_Data();
 			}
+			if (ms % 20 == 17)
+			{
+				if (Bsp_Get_Imu_Type() == IMU_TYPE_ICM20948)     ICM20948_Send_Attitude_Data();
+				else if (Bsp_Get_Imu_Type() == IMU_TYPE_MPU9250) MPU9250_Send_Attitude_Data();
+			}
+			#endif
 		}
-		report_count++;
-		if (report_count > AUTO_SEND_TIMEOUT) report_count = 0;
+		ms++;
+		if (ms >= 200) ms = 0;
 		App_Delay_ms(1);
 		
 		#if PID_ASSISTANT_EN

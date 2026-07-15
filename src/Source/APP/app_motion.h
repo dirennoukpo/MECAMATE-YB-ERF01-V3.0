@@ -72,6 +72,9 @@ typedef enum _car_type
 
 void Motion_Stop(uint8_t brake);
 void Motion_Set_Pwm(int16_t Motor_1, int16_t Motor_2, int16_t Motor_3, int16_t Motor_4);
+// Open-loop PWM: same as above, but also disengages the on-board PID (g_start_ctrl).
+// This is the one FUNC_MOTOR must use. See the comment on the definition.
+void Motion_Set_Pwm_Open_Loop(int16_t Motor_1, int16_t Motor_2, int16_t Motor_3, int16_t Motor_4);
 void Motion_Ctrl(int16_t V_x, int16_t V_y, int16_t V_z, uint8_t adjust);
 void Motion_Ctrl_State(uint8_t state, uint16_t speed, uint8_t adjust);
 

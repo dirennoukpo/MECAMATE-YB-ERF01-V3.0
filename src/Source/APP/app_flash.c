@@ -89,7 +89,12 @@ static void Flash_CarType_Init(void)
     car_type_t car_type = (car_type_t)Flash_Read_CarType();
     if (car_type == 0xFFFF)
     {
-        car_type = CAR_MECANUM;
+        // MecaMate final robot is a differential (four-wheel) chassis. Default a BLANK
+        // flash to CAR_FOURWHEEL so a freshly-programmed board comes up on the right
+        // kinematics and the right wheel-circumference scale without any host command.
+        // A board whose flash already holds a car type keeps it: to change one, send
+        // set_car_type() from the host (persists + reboots) or long-press KEY1 to reset.
+        car_type = CAR_FOURWHEEL;
         Flash_Set_CarType(car_type);
     }
     Motion_Set_Car_Type(car_type);
@@ -341,7 +346,7 @@ void Flash_Reset_All_Value(void)
     Flash_Set_PID(MAX_MOTOR, PID_DEF_KP, PID_DEF_KI, PID_DEF_KD);
     Flash_Set_Yaw_PID(PID_YAW_DEF_KP, PID_YAW_DEF_KI, PID_YAW_DEF_KD);
     Flash_Reset_ARM_Median_Value();
-    Flash_Set_CarType(CAR_MECANUM);
+    Flash_Set_CarType(CAR_FOURWHEEL);   // MecaMate final robot: differential chassis
     Flash_Set_AKM_Angle(AKM_ANGLE_INIT);
 
 

@@ -81,20 +81,18 @@ float PID_Incre_Calc(pid_t *pid, float actual_val)
     pid->err_next = pid->err;
     
     /*Return the PWM output value*/
-    if (Motion_Get_Car_Type() == CAR_SUNRISE)
-    {
-        if (pid->pwm_output > (MOTOR_MAX_PULSE-MOTOR_SUNRISE_IGNORE_PULSE))
-            pid->pwm_output = (MOTOR_MAX_PULSE-MOTOR_SUNRISE_IGNORE_PULSE);
-        if (pid->pwm_output < (MOTOR_SUNRISE_IGNORE_PULSE-MOTOR_MAX_PULSE))
-            pid->pwm_output = (MOTOR_SUNRISE_IGNORE_PULSE-MOTOR_MAX_PULSE);
-    }
-    else
-    {
-        if (pid->pwm_output > (MOTOR_MAX_PULSE-MOTOR_IGNORE_PULSE))
-            pid->pwm_output = (MOTOR_MAX_PULSE-MOTOR_IGNORE_PULSE);
-        if (pid->pwm_output < (MOTOR_IGNORE_PULSE-MOTOR_MAX_PULSE))
-            pid->pwm_output = (MOTOR_IGNORE_PULSE-MOTOR_MAX_PULSE);
-    }
+    // The PID output is the pulse BEFORE the dead-zone offset is added by
+    // Motor_Ignore_Dead_Zone(). Its saturation must therefore be exactly the room
+    // left once that offset is taken out, otherwise the top of the range is either
+    // wasted (output clipped later by MOTOR_MAX_PULSE) or unreachable.
+    // Now that the offset follows the battery voltage, this limit has to follow it
+    // too -- it used to be the hard-coded MOTOR_MAX_PULSE - MOTOR_IGNORE_PULSE.
+    // Motor_Get_Ignore_Pulse() already handles the CAR_SUNRISE case internally.
+    float limit = (float)(MOTOR_MAX_PULSE - Motor_Get_Ignore_Pulse());
+
+    if (pid->pwm_output > limit)  pid->pwm_output = limit;
+    if (pid->pwm_output < -limit) pid->pwm_output = -limit;
+
     return pid->pwm_output;
 }
 

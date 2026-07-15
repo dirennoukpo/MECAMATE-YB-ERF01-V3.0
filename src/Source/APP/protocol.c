@@ -489,18 +489,18 @@ void Upper_Data_Parse(uint8_t *data_buf, uint8_t num)
 		int8_t motor_4 = *(data_buf + 7);
 		// uint8_t pid = *(data_buf + 8);
 		DEBUG("motor=%d, %d, %d, %d", motor_1, motor_2, motor_3, motor_4);
-		
-		int16_t motor_pulse = MOTOR_MAX_PULSE - MOTOR_IGNORE_PULSE;
-		if (Motion_Get_Car_Type() == CAR_SUNRISE)
-		{
-			motor_pulse = MOTOR_MAX_PULSE - MOTOR_SUNRISE_IGNORE_PULSE;
-		}
+
+		// The usable pulse range is whatever is left once the dead-zone offset is
+		// taken out -- and that offset now follows the battery voltage, so it has to
+		// be read, not hard-coded. Motor_Get_Ignore_Pulse() handles CAR_SUNRISE too.
+		int16_t motor_pulse = MOTOR_MAX_PULSE - Motor_Get_Ignore_Pulse();
 		speed[0] = (int16_t)motor_1 * (motor_pulse / 100.0);
 		speed[1] = (int16_t)motor_2 * (motor_pulse / 100.0);
 		speed[2] = (int16_t)motor_3 * (motor_pulse / 100.0);
 		speed[3] = (int16_t)motor_4 * (motor_pulse / 100.0);
-		// PWM control of the car motion
-		Motion_Set_Pwm(speed[0], speed[1], speed[2], speed[3]);
+		// PWM control of the car motion -- open loop: this ALSO disengages the on-board
+		// PID, which would otherwise overwrite these four values within 10 ms.
+		Motion_Set_Pwm_Open_Loop(speed[0], speed[1], speed[2], speed[3]);
 
 		// speed[0] = (int16_t)motor_1 * (10);
 		// speed[1] = (int16_t)motor_2 * (10);
@@ -940,18 +940,16 @@ void Upper_CAN_Execute_Command(uint8_t func, uint8_t* parm)
 		int8_t motor_3 = parm[2];
 		int8_t motor_4 = parm[3];
 		DEBUG("motor=%d, %d, %d, %d", motor_1, motor_2, motor_3, motor_4);
-		
-		int16_t motor_pulse = MOTOR_MAX_PULSE - MOTOR_IGNORE_PULSE;
-		if (Motion_Get_Car_Type() == CAR_SUNRISE)
-		{
-			motor_pulse = MOTOR_MAX_PULSE - MOTOR_SUNRISE_IGNORE_PULSE;
-		}
+
+		// Same two fixes as the UART path above: voltage-scaled dead zone, and open
+		// loop (disengage the on-board PID). Keep the two paths in step.
+		int16_t motor_pulse = MOTOR_MAX_PULSE - Motor_Get_Ignore_Pulse();
 		speed[0] = (int16_t)motor_1 * (motor_pulse / 100.0);
 		speed[1] = (int16_t)motor_2 * (motor_pulse / 100.0);
 		speed[2] = (int16_t)motor_3 * (motor_pulse / 100.0);
 		speed[3] = (int16_t)motor_4 * (motor_pulse / 100.0);
 		// PWM control of the car motion
-		Motion_Set_Pwm(speed[0], speed[1], speed[2], speed[3]);
+		Motion_Set_Pwm_Open_Loop(speed[0], speed[1], speed[2], speed[3]);
 		break;
 	}
 

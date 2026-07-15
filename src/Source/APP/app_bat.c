@@ -6,8 +6,10 @@
 
 #include "bsp.h"
 
-// Battery voltage abnormality count threshold; multiplied by 100 milliseconds gives the delay time, in milliseconds.
-// For example: 100*10=1000, i.e. 1 second.
+// Battery voltage abnormality count threshold. Bat_State() runs every 100 ms (vTask_App
+// ticks at 10 ms and Bat_Show_LED_Handle acts one call in ten), and the test below is a
+// strict '>', so the alarm needs BAT_CHECK_COUNT + 1 = 21 CONSECUTIVE abnormal samples:
+// 2.1 s, not the 1 s the stock comment claimed.
 #define BAT_CHECK_COUNT        20
 
 uint8_t g_system_enable = 1;      // System function state. Becomes 0 after an undervoltage or overvoltage is detected. Can only be restored to 1 by a reset
@@ -17,81 +19,63 @@ int Voltage_Unusual_Count = 0;    // Abnormal voltage count
 
 
 // Check the battery voltage state. Return value: 1=voltage normal, 0=voltage too low, 2=voltage too high.
+//
+// PORT NOTE -- this had two bodies, picked at run time by Motion_Get_Car_Type(), because the
+// CHASSIS type doubled as a declaration of the PACK voltage. The pack is now declared for what
+// it is (BATTERY_CELLS, config.h), so one body is enough. That removes two teeth:
+//
+//   (1) THE RATCHET. The non-SUNRISE body carried a clause that skipped the alarm between
+//       6.5 V and 8.5 V -- but that clause neither incremented Voltage_Unusual_Count NOR
+//       reset it. The only reset sat in the final else, reachable only inside 9.6-13.0 V,
+//       where a 2S pack never goes. So on a 2S the counter could only ever climb: every
+//       isolated sag below 6.5 V (four mecanum motors stalling) added one, permanently.
+//       Twenty such sags, hours apart, and the twenty-first latched BATTERY_LOW on a
+//       perfectly healthy pack -- brake on, robot dead until a power cycle. The counter is
+//       now cleared by any in-band sample, so BAT_CHECK_COUNT means what its name says:
+//       21 CONSECUTIVE bad samples.
+//
+//   (2) THE BLIND WINDOW ITSELF. Harmless on a 2S (which lives there), lethal on a 3S:
+//       6.5-8.5 V is 2.2-2.8 V/cell, and the firmware answered BATTERY_NORMAL.
+//
+// Side effect, and a welcome one: a forged CAN/UART FUNC_CAR_TYPE frame can no longer move
+// the battery thresholds at run time.
 static uint8_t Bat_Check_Voltage(int Voltage)
 {
-	if (Motion_Get_Car_Type() == CAR_SUNRISE)
+	if (Voltage > Bat_Get_Over_Voltage())
 	{
-		if (Voltage > Bat_Get_Over_Voltage())
+		Voltage_Unusual_Count++;
+		if(Voltage_Unusual_Count > BAT_CHECK_COUNT)
 		{
-			Voltage_Unusual_Count++;
-			if(Voltage_Unusual_Count > BAT_CHECK_COUNT)
-			{
-				return BATTERY_OVER_VOLTAGE;
-			}
+			return BATTERY_OVER_VOLTAGE;
 		}
-		else if (Voltage < Bat_Get_Low_Voltage())
+	}
+	else if (Voltage < Bat_Get_Low_Voltage())
+	{
+		Voltage_Unusual_Count++;
+		if(Voltage_Unusual_Count > BAT_CHECK_COUNT)
 		{
-			Voltage_Unusual_Count++;
-			if(Voltage_Unusual_Count > BAT_CHECK_COUNT)
-			{
-				return BATTERY_LOW;
-			}
-		}
-		else
-		{
-			Voltage_Unusual_Count = 0;
+			return BATTERY_LOW;
 		}
 	}
 	else
 	{
-		if (Voltage > Bat_Get_Over_Voltage())
-		{
-			Voltage_Unusual_Count++;
-			if(Voltage_Unusual_Count > BAT_CHECK_COUNT)
-			{
-				return BATTERY_OVER_VOLTAGE;
-			}
-		}
-		else if (Voltage < Bat_Get_Low_Voltage())
-		{
-			// Filter out the low-voltage alarm function between 6.5 and 8.5.
-			if (Voltage > 85 || Voltage < 65)
-			{
-				Voltage_Unusual_Count++;
-				if(Voltage_Unusual_Count > BAT_CHECK_COUNT)
-				{
-					return BATTERY_LOW;
-				}
-			}
-		}
-		else
-		{
-			Voltage_Unusual_Count = 0;
-		}
+		Voltage_Unusual_Count = 0;
 	}
 	return BATTERY_NORMAL;
 }
 
-// The Rosmaster series cars use a 12.6V battery pack, low-voltage alarm threshold is 9.6V.
-// The sunrise series cars use an 8.4V battery pack, low-voltage alarm threshold is 6.5V.
+// Low-voltage alarm threshold, in tenths of a volt. Follows the declared PACK
+// (BATTERY_CELLS in config.h), no longer the chassis type.
 uint8_t Bat_Get_Low_Voltage(void)
 {
-	if (Motion_Get_Car_Type() == CAR_SUNRISE)
-	{
-		return 65;
-	}
-	return 96;
+	return (uint8_t)BAT_LOW_VOLTAGE_Z10;
 }
 
-// The Rosmaster series cars use a 12.6V battery pack, overvoltage alarm threshold is 13.0V.
-// The sunrise series cars use an 8.4V battery pack, overvoltage alarm threshold is 8.5V.
+// Over-voltage alarm threshold, in tenths of a volt. Doubles as the "wrong pack plugged in"
+// detector: on a 2S build, any healthy 3S reads far above it.
 uint8_t Bat_Get_Over_Voltage(void)
 {
-	if (Motion_Get_Car_Type() == CAR_SUNRISE)
-	{
-		return 85;
-	}
-	return 130;
+	return (uint8_t)BAT_OVER_VOLTAGE_Z10;
 }
 
 

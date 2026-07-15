@@ -1,23 +1,51 @@
 #include "bsp_motor.h"
 #include "bsp.h"
 #include "app_motion.h"
+#include "app_bat.h"   /* Bat_Voltage_Z10(), for the voltage-scaled dead zone */
 
 
 uint8_t motor_enable = 0;
 
 
+// Dead-zone offset for the CURRENT battery voltage (see the block comment in
+// bsp_motor.h). Returns a pulse count, to be added to the commanded pulse.
+//
+// This is called from vTask_Speed every 10 ms, four times per cycle. The Cortex-M3
+// has a hardware divider, so the cost is a handful of cycles -- not worth caching.
+int16_t Motor_Get_Ignore_Pulse(void)
+{
+    int32_t v10;
+    int32_t ignore;
+
+    // The Sunrise chassis keeps its original fixed value: different motors, and it
+    // is a chassis we cannot test here.
+    if (Motion_Get_Car_Type() == CAR_SUNRISE)
+        return MOTOR_SUNRISE_IGNORE_PULSE;
+
+    v10 = (int32_t)Bat_Voltage_Z10();   // battery voltage x10, e.g. 83 = 8.3 V
+
+    // Bat_Voltage_Z10() is 0 until the first ADC conversion completes, and the motors
+    // can already be driven before that. Dividing by it would fault. Anything outside
+    // 5..20 V is not a plausible pack either -- fall back to the stock fixed offset.
+    if (v10 < 50 || v10 > 200)
+        return MOTOR_IGNORE_PULSE;
+
+    // ignore = V_breakaway / V_battery * MOTOR_MAX_PULSE, in integer maths.
+    // Worst case 4100 * 3600 = 14 760 000, which needs the 32-bit intermediate.
+    ignore = ((int32_t)MOTOR_DEAD_ZONE_MV * MOTOR_MAX_PULSE) / (v10 * 100);
+
+    if (ignore < MOTOR_IGNORE_MIN) ignore = MOTOR_IGNORE_MIN;
+    if (ignore > MOTOR_IGNORE_MAX) ignore = MOTOR_IGNORE_MAX;
+
+    return (int16_t)ignore;
+}
+
 static int16_t Motor_Ignore_Dead_Zone(int16_t pulse)
 {
-    if (Motion_Get_Car_Type() == CAR_SUNRISE)
-    {
-        if (pulse > 0) return pulse + MOTOR_SUNRISE_IGNORE_PULSE;
-        if (pulse < 0) return pulse - MOTOR_SUNRISE_IGNORE_PULSE;
-    }
-    else
-    {
-        if (pulse > 0) return pulse + MOTOR_IGNORE_PULSE;
-        if (pulse < 0) return pulse - MOTOR_IGNORE_PULSE;
-    }
+    int16_t ignore = Motor_Get_Ignore_Pulse();
+
+    if (pulse > 0) return pulse + ignore;
+    if (pulse < 0) return pulse - ignore;
     return 0;
 }
 

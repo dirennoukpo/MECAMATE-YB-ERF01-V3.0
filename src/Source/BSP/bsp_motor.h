@@ -3,6 +3,7 @@
 #define __BSP_MOTOR_H__
 
 #include "stm32f10x.h"
+#include "config.h"   /* BATTERY_NOMINAL_Z10, for the pre-first-ADC-sample fallback */
 
 #define MOTOR_A_IN1_PORT  GPIOB                /* GPIO port */
 #define MOTOR_A_IN1_PIN   GPIO_Pin_0          /* GPIO pin number */
@@ -85,9 +86,60 @@
 
 
 #define MOTOR_SUNRISE_IGNORE_PULSE  (2000)
-#define MOTOR_IGNORE_PULSE  (1600)
+/* Fallback dead-zone offset. Reached only while Bat_Voltage_Z10() is still implausible --
+ * chiefly the window between the scheduler starting and the first ADC conversion, where the
+ * motors are already commandable from the CAN RX ISR. The stock literal 1600 was tuned for
+ * the 12.6 V pack; deriving it from the declared pack keeps that window honest whichever
+ * pack is fitted (1757 counts on a 2S, 1171 on a 3S). Both stay inside [MOTOR_IGNORE_MIN,
+ * MOTOR_IGNORE_MAX]. Forward references are fine: a macro expands at its point of use. */
+#define MOTOR_IGNORE_PULSE  (((MOTOR_DEAD_ZONE_MV) * (MOTOR_MAX_PULSE)) / ((BATTERY_NOMINAL_Z10) * 100))
 #define MOTOR_MAX_PULSE     (3600)
 #define MOTOR_FREQ_DIVIDE   (0)
+
+
+/* ---------------------------------------------------------------------------
+ * Dead-zone compensation, scaled with the battery voltage.
+ *
+ * A DC motor only breaks away from static friction above a certain voltage
+ * ACROSS THE MOTOR, and the PWM only delivers  V_motor = duty * V_battery.
+ * So the duty needed to start turning is  V_breakaway / V_battery  -- it depends
+ * on the battery, and a single fixed offset cannot be right at two voltages.
+ *
+ * The stock firmware adds a fixed MOTOR_IGNORE_PULSE = 1600 (44.4 % duty), which
+ * is only correct for the 12.6 V pack it was tuned on. Measured on this robot:
+ *
+ *   V_breakaway per motor -- TWO different robots, do not mix them up:
+ *     Bench (real Rosmaster, 65 mm wheels):  M1 4.10  M2 4.15  M3 3.92  M4 4.10 V
+ *     MecaMate final robot (120 mm wheels, measured 15/07 wheels-free at 12.6 V):
+ *                                            M1 6.14  M2 5.63  M3 5.97  M4 6.14 V
+ *   The final robot's motors start MUCH harder (~6 V vs ~4 V) even though the wheels
+ *   turn MORE freely by hand: hand-turning is kinetic friction, starting under power is
+ *   stiction + the motor's winding resistance. Different motors, higher start voltage.
+ *
+ *   With the fixed 1600, on an 8.4 V (2S) pack:
+ *     1 % command -> 45 % duty -> 3.74 V  -> nothing moves
+ *     the wheels only start turning around 9 % of command.
+ *   And on the 12.6 V pack it OVER-compensates: 1 % command already delivers
+ *     5.6 V to the motor, so the speed jumps instead of ramping.
+ *
+ * MOTOR_DEAD_ZONE_MV is the measured breakaway voltage. Motor_Get_Ignore_Pulse()
+ * turns it back into a pulse count for whatever the battery currently reads, so
+ * that 1 % of command sits right at the edge of motion and 100 % is full scale,
+ * WHATEVER the pack. That also makes the host-side kS feedforward stable instead
+ * of drifting as the battery discharges.
+ *
+ * NOTE: measured with the wheels free. Under the robot's own weight the breakaway
+ * is higher -- that extra torque is the PID's job (or the host's), not this
+ * offset's, which only has to get an unloaded motor moving.
+ * ------------------------------------------------------------------------- */
+#define MOTOR_DEAD_ZONE_MV  (6150)   /* MecaMate final robot: measured wheels-free max, */
+                                     /* 15/07/2026. Was 4100 (the bench value).        */
+                                     /* WHEELS-FREE value -- under the 7 kg load on the */
+                                     /* ground it will be higher; re-measure and raise. */
+#define MOTOR_IGNORE_MIN    (800)    /* guard: never leave less headroom than this */
+#define MOTOR_IGNORE_MAX    (2400)   /* guard: keep at least 1200 counts of range  */
+
+int16_t Motor_Get_Ignore_Pulse(void);
 
 
 // MOTOR: M1 M2 M3 M4

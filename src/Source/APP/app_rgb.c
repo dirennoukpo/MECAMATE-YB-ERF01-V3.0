@@ -5,6 +5,7 @@
 #include "bsp_common.h"
 #include "app_motion.h"
 #include "stdio.h"
+#include "config.h"   /* BATTERY_CELLS: the fuel gauge follows the pack, not the chassis */
 
 // Number of waterfall LEDs
 #define WATERFALL_MAX     4
@@ -382,7 +383,12 @@ static void app_rgb_battery(void)
     V_Z10 = g_V_Z10 >> 3;
     g_V_Z10 = 0;
     RGB_Clear();
-    if (Motion_Get_Car_Type() == CAR_SUNRISE)
+    // The gauge scale is a property of the PACK, not of the chassis. Keyed on the chassis
+    // type, a 2S pack on a mecanum chassis was measured against the 12.6 V scale and so
+    // showed a permanent "empty" (one dim red LED) at full charge. The CAR_SUNRISE arm is
+    // kept because that chassis also carries an 8.4 V pack -- both conditions mean the same
+    // thing, "this is an 8.4 V pack".
+    if (BATTERY_CELLS == 2 || Motion_Get_Car_Type() == CAR_SUNRISE)
     {
         rgb_battery_84V(V_Z10);
     }
