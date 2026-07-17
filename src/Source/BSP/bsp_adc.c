@@ -85,8 +85,11 @@ float Adc_Get_Battery_Volotage(void)
 {
 	float temp;
 	temp = Adc_Get_Measure_Volotage();
-	// The actually measured value is slightly lower than the calculated one.
-	temp = temp * 4.03f;    //temp*(10+3.3)/3.3; 
+	// Divider gain, CALIBRATED against a meter on 17/07/2026: with 4.03f (the nominal
+	// (10+3.3)/3.3) the card read 13.10 V while the meter read 13.21 V on the terminals
+	// -- 0.83 % low. The divider has no offset source (pure resistive), so one point sets
+	// the gain: 4.03 * 13.21/13.10 = 4.064. Now accurate to the ADC quantum at 13 V.
+	temp = temp * 4.064f;   // was 4.03f (nominal); +0.83 % to match the meter
 	return temp;
 }
 

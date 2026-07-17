@@ -7,9 +7,16 @@
 #define PID_SUNRISE_KI  (0.08f)
 #define PID_SUNRISE_KD  (0.5f)
 
-#define PID_DEF_KP      (0.8f)
-#define PID_DEF_KI      (0.06f)
-#define PID_DEF_KD      (0.5f)
+/* Velocity PID defaults, TUNED under load (17/07/2026, final robot, 7 kg on the ground).
+ * Was 0.8 / 0.06 / 0.5 (Yahboom stock, only ever validated wheels-free). Under load the
+ * stock Ki=0.06 wound up during the slower loaded rise and overshot 15 % on a 0.5 m/s step.
+ * Lowering Ki to 0.045 halves the overshoot to ~8 % with a clean ~1 % steady-state error;
+ * Kp 1.0 / Kd 0.6 keep the rise near ~540 ms. Smoothness over speed, which suits the 15 kg
+ * payload to come. These are also written to the card's data flash, so a running board keeps
+ * them across power cycles; this default only takes over after a FULL flash reset. See TUNING.md. */
+#define PID_DEF_KP      (1.0f)
+#define PID_DEF_KI      (0.045f)
+#define PID_DEF_KD      (0.6f)
 
 #define PID_YAW_DEF_KP  (0.4)
 #define PID_YAW_DEF_KI  (0.0)

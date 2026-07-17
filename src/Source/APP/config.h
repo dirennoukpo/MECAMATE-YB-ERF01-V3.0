@@ -30,10 +30,12 @@
  *
  * All values are in TENTHS OF A VOLT -- the unit of Voltage_Z10, i.e. the value AS
  * READ back by Adc_Get_Battery_Volotage() (bsp_adc.c), not the true pack voltage.
- * On this board a 8.4 V pack reads 83. That offset is the divider's resistor
- * tolerance and VDDA, not a firmware bias: the 4.03f factor is (10+3.3)/3.3 to
- * within 0.01 %. The ADC chain has never been calibrated against a meter, so keep
- * a few tenths of margin on every threshold below.
+ * CALIBRATED against a meter on 17/07/2026: card 13.10 V vs meter 13.21 V on the
+ * terminals -- 0.83 % low. The divider gain was corrected 4.03f -> 4.064f in bsp_adc.c
+ * (pure resistive divider, one point sets the gain), so the readout now tracks the real
+ * pack voltage to the ADC quantum at 13 V. The readout ceiling is 134 (a full-scale
+ * 4095 count); over-voltage sits just under it, see BAT_3S_OVER_Z10. Thresholds below
+ * are now real volts, not raw counts -- keep a small margin for temperature drift.
  * ======================================================================== */
 #define BATTERY_CELLS                3
 
@@ -65,9 +67,13 @@
                                            /* heavy sustained load false-locks, drop to  */
                                            /* 80 (8.0 V); the host should soft-warn near  */
                                            /* 9.5-10 V resting before this ever fires.    */
-#define BAT_3S_OVER_Z10              138    /* 13.8 V. ~0.8 V above the pack's 13 V peaks, */
-                                           /* robust to ADC variance; still catches a     */
-                                           /* real overcharge/charger fault (>4.6 V/cell).*/
+#define BAT_3S_OVER_Z10              133    /* 13.3 V. Was 138 = DEAD CODE: after calibration */
+                                           /* the readout ceiling is 134 (4095 count), so a  */
+                                           /* 138 threshold could never fire. 133 is the      */
+                                           /* highest reachable value; it clears the pack's   */
+                                           /* real 13.21 V peak (reads 132) and trips only on  */
+                                           /* a railed reading (134) -- a genuine overcharge   */
+                                           /* >~13.4 V, or a wrong pack (a 4S at 16.8 V rails). */
 
 /* Per-profile sanity only. The old cross-profile "2S ceiling < 3S floor" check is gone:
  * it protected a use case that no longer exists (one board hot-swapped between an 8.4 V and

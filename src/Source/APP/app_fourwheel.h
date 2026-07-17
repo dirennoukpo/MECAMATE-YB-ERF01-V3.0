@@ -17,15 +17,15 @@
 
 // Displacement of one full wheel revolution of the four-wheel car, unit: MM.
 // MecaMate final robot: 120 mm wheels -> pi * 120 = 376.99 mm.
-// This is the ONLY constant that turns encoder pulses into mm/s for the four-wheel
-// (differential) chassis, so it must match the real wheel or every reported speed and
-// every closed-loop distance is off by the same factor. The PID cannot catch this:
-// it closes on the encoder, so it converges perfectly in pulses while the robot runs
-// at the wrong ground speed.
-// NOTE: 376.99 is the FREE rolling circumference. Under the ~7 kg load the tyre
-// compresses a few %, so the definitive value is measured by rolling the robot over a
-// known ground distance and comparing with the encoder. Motors are unchanged, so the
-// encoder resolution (ENCODER_CIRCLE_330 = 1320 pulses/rev) stays correct.
+// Wheel circumference: this and ENCODER_CIRCLE_330 together turn encoder pulses into
+// mm/s and distance, so if either is wrong every reported speed and every closed-loop
+// distance is off by the same factor. The PID cannot catch it: it closes on the encoder,
+// converging perfectly in pulses while the robot runs at the wrong ground speed.
+// MEASURED 17/07/2026: the wheel is RIGID (120 mm, no load compression), so pi*120 =
+// 376.99 mm is correct and stays. The 2.3 % odometry error found by rolling ~2 m and
+// comparing to a tape was NOT the wheel -- it was the encoder count: the "30:1" gearbox
+// is really ~30.68:1, so ENCODER_CIRCLE_330 went 1320 -> 1350 (see app_motion.h).
+// After that fix, get_motor_speed_raw/lpf integrate to the encoder distance within 0.1 %.
 #define FOURWHEEL_CIRCLE_MM            (376.99f)
 
 

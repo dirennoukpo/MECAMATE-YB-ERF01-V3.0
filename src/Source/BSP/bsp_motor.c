@@ -7,43 +7,74 @@
 uint8_t motor_enable = 0;
 
 
-// Dead-zone offset for the CURRENT battery voltage (see the block comment in
-// bsp_motor.h). Returns a pulse count, to be added to the commanded pulse.
+// Per-axis breakaway voltages, indexed by Motor_ID. See the block comment in
+// bsp_motor.h for why these are measured wheels-free and must stay that way.
+static const uint16_t motor_dead_zone_mv[MAX_MOTOR] = {
+    MOTOR_DEAD_ZONE_MV_M1,
+    MOTOR_DEAD_ZONE_MV_M2,
+    MOTOR_DEAD_ZONE_MV_M3,
+    MOTOR_DEAD_ZONE_MV_M4,
+};
+
+// Dead-zone offset for THIS axis at the CURRENT battery voltage (see the block comment
+// in bsp_motor.h). Returns a pulse count, to be added to the commanded pulse.
 //
 // This is called from vTask_Speed every 10 ms, four times per cycle. The Cortex-M3
 // has a hardware divider, so the cost is a handful of cycles -- not worth caching.
-int16_t Motor_Get_Ignore_Pulse(void)
+int16_t Motor_Get_Ignore_Pulse(uint8_t id)
 {
     int32_t v10;
     int32_t ignore;
+    int32_t mv;
+
+    // Out of range is a caller bug. Return 0 rather than index off the end: it keeps
+    // the ignore + PID_sat = MOTOR_MAX_PULSE invariant intact (0 + 3600), and
+    // Motor_Set_Pwm()'s switch already drops an unknown id on the floor anyway.
+    if (id >= MAX_MOTOR)
+        return 0;
 
     // The Sunrise chassis keeps its original fixed value: different motors, and it
     // is a chassis we cannot test here.
     if (Motion_Get_Car_Type() == CAR_SUNRISE)
         return MOTOR_SUNRISE_IGNORE_PULSE;
 
+    mv = (int32_t)motor_dead_zone_mv[id];
     v10 = (int32_t)Bat_Voltage_Z10();   // battery voltage x10, e.g. 83 = 8.3 V
 
     // Bat_Voltage_Z10() is 0 until the first ADC conversion completes, and the motors
     // can already be driven before that. Dividing by it would fault. Anything outside
-    // 5..20 V is not a plausible pack either -- fall back to the stock fixed offset.
+    // 5..20 V is not a plausible pack either -- substitute the declared pack and let the
+    // same maths and ceiling below apply, so this window is offset per-axis AND clamped
+    // exactly like the normal path (the old early return skipped the ceiling).
     if (v10 < 50 || v10 > 200)
-        return MOTOR_IGNORE_PULSE;
+        v10 = (int32_t)BATTERY_NOMINAL_Z10;
 
     // ignore = V_breakaway / V_battery * MOTOR_MAX_PULSE, in integer maths.
-    // Worst case 4100 * 3600 = 14 760 000, which needs the 32-bit intermediate.
-    ignore = ((int32_t)MOTOR_DEAD_ZONE_MV * MOTOR_MAX_PULSE) / (v10 * 100);
+    // Worst case 6150 * 3600 = 22 140 000, which needs the 32-bit intermediate.
+    //
+    // A pure GAIN error on the ADC cancels here: mv was identified as
+    // duty_breakaway * Vbat_read, so ignore = duty_breakaway * MOTOR_MAX_PULSE and
+    // Vbat_read drops out. The duty produced stays correct even though the chain has
+    // never been calibrated against a meter -- which is why the calibration is a debt
+    // for the battery THRESHOLDS (absolute volts), not a blocker for this offset.
+    ignore = (mv * MOTOR_MAX_PULSE) / (v10 * 100);
 
-    if (ignore < MOTOR_IGNORE_MIN) ignore = MOTOR_IGNORE_MIN;
+    // Ceiling only, on every path. MOTOR_IGNORE_MAX = MOTOR_MAX_PULSE - 1 keeps the PID's
+    // room >= 1 so the sign of the command survives (see bsp_motor.h). No floor: the
+    // smallest reachable value is 6150*3600/(200*100) = 1107, so a MIN clamp was dead.
     if (ignore > MOTOR_IGNORE_MAX) ignore = MOTOR_IGNORE_MAX;
 
     return (int16_t)ignore;
 }
 
-static int16_t Motor_Ignore_Dead_Zone(int16_t pulse)
+static int16_t Motor_Ignore_Dead_Zone(uint8_t id, int16_t pulse)
 {
-    int16_t ignore = Motor_Get_Ignore_Pulse();
+    int16_t ignore = Motor_Get_Ignore_Pulse(id);
 
+    // Keyed on the sign of the COMMAND, not of the measured speed: dry friction is
+    // discontinuous at w=0 (-C_s * sign(w)), so a Coulomb feedforward must be too.
+    // The step of `ignore` counts at zero crossing produces NO net torque step -- it
+    // cancels the friction. Do not "smooth" it.
     if (pulse > 0) return pulse + ignore;
     if (pulse < 0) return pulse - ignore;
     return 0;
@@ -125,7 +156,7 @@ void Motor_Stop(uint8_t brake)
 // Set motor speed, speed:±3600, 0 means stop
 void Motor_Set_Pwm(uint8_t id, int16_t speed)
 {
-    int16_t pulse = Motor_Ignore_Dead_Zone(speed);
+    int16_t pulse = Motor_Ignore_Dead_Zone(id, speed);
     // Limit the input
     if (pulse >= MOTOR_MAX_PULSE)
         pulse = MOTOR_MAX_PULSE;

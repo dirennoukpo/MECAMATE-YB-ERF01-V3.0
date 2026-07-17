@@ -86,15 +86,11 @@
 
 
 #define MOTOR_SUNRISE_IGNORE_PULSE  (2000)
-/* Fallback dead-zone offset. Reached only while Bat_Voltage_Z10() is still implausible --
- * chiefly the window between the scheduler starting and the first ADC conversion, where the
- * motors are already commandable from the CAN RX ISR. The stock literal 1600 was tuned for
- * the 12.6 V pack; deriving it from the declared pack keeps that window honest whichever
- * pack is fitted (1757 counts on a 2S, 1171 on a 3S). Both stay inside [MOTOR_IGNORE_MIN,
- * MOTOR_IGNORE_MAX]. Forward references are fine: a macro expands at its point of use. */
-#define MOTOR_IGNORE_PULSE  (((MOTOR_DEAD_ZONE_MV) * (MOTOR_MAX_PULSE)) / ((BATTERY_NOMINAL_Z10) * 100))
 #define MOTOR_MAX_PULSE     (3600)
 #define MOTOR_FREQ_DIVIDE   (0)
+/* The old scalar MOTOR_IGNORE_PULSE fallback is gone: Motor_Get_Ignore_Pulse() now derives
+ * that window's offset per-axis from BATTERY_NOMINAL_Z10 directly, so a single shared
+ * constant would only have been a way for the four axes to disagree with themselves. */
 
 
 /* ---------------------------------------------------------------------------
@@ -122,7 +118,7 @@
  *   And on the 12.6 V pack it OVER-compensates: 1 % command already delivers
  *     5.6 V to the motor, so the speed jumps instead of ramping.
  *
- * MOTOR_DEAD_ZONE_MV is the measured breakaway voltage. Motor_Get_Ignore_Pulse()
+ * MOTOR_DEAD_ZONE_MV_Mx is each axis's breakaway voltage. Motor_Get_Ignore_Pulse()
  * turns it back into a pulse count for whatever the battery currently reads, so
  * that 1 % of command sits right at the edge of motion and 100 % is full scale,
  * WHATEVER the pack. That also makes the host-side kS feedforward stable instead
@@ -132,14 +128,58 @@
  * is higher -- that extra torque is the PID's job (or the host's), not this
  * offset's, which only has to get an unloaded motor moving.
  * ------------------------------------------------------------------------- */
-#define MOTOR_DEAD_ZONE_MV  (6150)   /* MecaMate final robot: measured wheels-free max, */
-                                     /* 15/07/2026. Was 4100 (the bench value).        */
-                                     /* WHEELS-FREE value -- under the 7 kg load on the */
-                                     /* ground it will be higher; re-measure and raise. */
-#define MOTOR_IGNORE_MIN    (800)    /* guard: never leave less headroom than this */
-#define MOTOR_IGNORE_MAX    (2400)   /* guard: keep at least 1200 counts of range  */
+/* THE FOUR MOTORS ARE IDENTICAL to within measurement noise. A 5-run x 2-direction
+ * campaign (17/07/2026, wheels-free, per-axis, vitesse-soutenue criterion) gave the
+ * three healthy motors 6.22 / 6.15 / 6.06 V and the replaced M4 6.21 V -- mean 6.16 V.
+ * The between-axis spread (0.08 V over the healthy three) is SMALLER than one axis's
+ * own run-to-run noise (M2 alone: sigma 0.18 V), so the per-axis dispersion is noise,
+ * not signal, and a single value is the honest choice. Kept as four named constants
+ * only so a REAL difference could be encoded later if one is ever proven across runs.
+ *
+ * HISTORY -- do not repeat. The first cut used [6140,5630,5970,6140], read as "not
+ * four identical motors, 0.51 V spread". That was ONE unlucky run of a noisy motor
+ * (M2's 5.63) plus a FAILING motor (old M4's 6.82, 6/10 reliability, -0.28 V AV/AR
+ * asymmetry -- a hardware fault, replaced 17/07, not a real breakaway). The stock
+ * scalar 6150 it replaced was already right to 0.1 %. The per-axis table chased noise.
+ *
+ * WHEELS-FREE IS THE CORRECT CONDITION, and this is not a fallback -- it is the only
+ * condition that isolates the quantity this offset exists to cancel. Verified on the
+ * ground 17/07/2026: an axis driven alone measures the tyre's traction limit, the
+ * skid-steer pivot geometry and the steering play, all at once -- never the motor's
+ * dry friction. With the wheels off the ground none of those three terms exists.
+ * The robot's weight is a RESISTIVE TORQUE, not Coulomb friction: that is the PID's
+ * job, not this offset's. Do not "correct" these values with a load term -- that is
+ * the double compensation we rejected on 15/07. */
+#define MOTOR_DEAD_ZONE_MV_M1   (6150)
+#define MOTOR_DEAD_ZONE_MV_M2   (6150)
+#define MOTOR_DEAD_ZONE_MV_M3   (6150)
+#define MOTOR_DEAD_ZONE_MV_M4   (6150)
 
-int16_t Motor_Get_Ignore_Pulse(void);
+/* No MOTOR_IGNORE_MIN: the smallest reachable offset is 6150*3600/(200*100) = 1107, so a
+ * floor of 800 was unreachable dead code. Only the ceiling below is a live guard. */
+/* Clamping the offset below full scale is what CREATES the ceiling that kills the card:
+ * it caps V_motor at MOTOR_IGNORE_MAX/3600 * Vbat regardless of what the motor needs.
+ * The offset and the PID's saturation both come from Motor_Get_Ignore_Pulse(), so
+ *     ignore + PID_sat = MOTOR_MAX_PULSE
+ * holds by construction at any value -- there is no range to "protect". The stock 2400
+ * capped V_motor at 0.667 * Vbat, which is the ceiling we are removing.
+ *
+ * WHY MOTOR_MAX_PULSE - 1 AND NOT MOTOR_MAX_PULSE. The last count is not a rounding
+ * nicety, it is what keeps the SIGN of the command alive. At ignore = MOTOR_MAX_PULSE
+ * the PID's limit is exactly 0, so pwm_output clamps to 0 -- and Motor_Ignore_Dead_Zone()
+ * only adds the offset to a NON-ZERO pulse (a commanded zero must stay zero), so a
+ * full-throttle command collapses to 0 % duty: the exact opposite of the intent.
+ * Worse, the clamp bites at a different voltage on each axis because the KS differ
+ * (v10 <= 61 for M1/M4, <= 59 for M3, <= 56 for M2): in the [57,61] band M1/M4 would
+ * go dead while M2/M3 ran at 100 %, i.e. an UNCOMMANDED YAW on a collapsing pack, with
+ * the cliff falling on a single ADC count. Reserving one count keeps limit >= 1, so the
+ * output saturates at +/-1, the offset is applied, and 1 + 3599 = 3600 -- the motor
+ * really does get 100 % duty in the COMMANDED direction, on every axis. That is the
+ * physically honest answer to "the motor needs more volts than the pack has", and the
+ * invariant still holds exactly: 3599 + 1 = 3600. */
+#define MOTOR_IGNORE_MAX    (MOTOR_MAX_PULSE - 1) /* no ceiling, but keep the sign alive */
+
+int16_t Motor_Get_Ignore_Pulse(uint8_t id);
 
 
 // MOTOR: M1 M2 M3 M4

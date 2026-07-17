@@ -7,8 +7,13 @@
 // 205RPM motor, for one full wheel revolution, encoder pulse count = reduction ratio * encoder disc lines * encoder pulses (56*11*4)
 #define ENCODER_CIRCLE_205           (2464.0f)
 
-// 330RPM motor, for one full wheel revolution, encoder pulse count = reduction ratio * encoder disc lines * encoder pulses (30*11*4)
-#define ENCODER_CIRCLE_330           (1320.0f)
+// 330RPM motor: pulses per wheel revolution = reduction * encoder lines * quadrature.
+// Nominal (30*11*4) = 1320, but MEASURED on this robot = 1350: a "30:1" gearbox is
+// actually ~30.68:1 from its tooth counts, and 30.68*11*4 = 1350. Odometry calibration
+// 17/07/2026 (final robot, 120 mm wheels, 7 kg): driven ~2 m repeatedly, the encoder
+// over-read 2.3 % vs a tape measure until this was raised from 1320. Four per-wheel
+// estimates converged to 1340/1349/1350/1361. Same motors on CAR_MECANUM, so shared.
+#define ENCODER_CIRCLE_330           (1350.0f)
 
 // 450RPM motor, for one full wheel revolution, encoder pulse count = reduction ratio * encoder disc lines * encoder pulses (20*13*4)
 #define ENCODER_CIRCLE_450           (1040.0f)

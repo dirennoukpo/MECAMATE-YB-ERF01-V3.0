@@ -67,8 +67,10 @@ float PID_Get_Target(pid_t *pid)
     return pid->target_val; // Set the current target value
 }
 
-// Incremental PID calculation formula
-float PID_Incre_Calc(pid_t *pid, float actual_val)
+// Incremental PID calculation formula.
+// motor_id selects which axis's dead-zone offset this output has to leave room for --
+// the offset is per-axis, so the saturation must be too, or the invariant below breaks.
+float PID_Incre_Calc(pid_t *pid, uint8_t motor_id, float actual_val)
 {
     /*Compute the error between target and actual value*/
     pid->err = pid->target_val - actual_val;
@@ -85,10 +87,16 @@ float PID_Incre_Calc(pid_t *pid, float actual_val)
     // Motor_Ignore_Dead_Zone(). Its saturation must therefore be exactly the room
     // left once that offset is taken out, otherwise the top of the range is either
     // wasted (output clipped later by MOTOR_MAX_PULSE) or unreachable.
-    // Now that the offset follows the battery voltage, this limit has to follow it
-    // too -- it used to be the hard-coded MOTOR_MAX_PULSE - MOTOR_IGNORE_PULSE.
+    // Now that the offset follows the battery voltage AND the axis, this limit has to
+    // follow both -- it used to be the hard-coded MOTOR_MAX_PULSE - MOTOR_IGNORE_PULSE.
     // Motor_Get_Ignore_Pulse() already handles the CAR_SUNRISE case internally.
-    float limit = (float)(MOTOR_MAX_PULSE - Motor_Get_Ignore_Pulse());
+    //
+    // Both sides read the SAME function, which is what makes
+    //     ignore + PID_sat = MOTOR_MAX_PULSE
+    // true at every voltage and on every axis. That invariant is why raising
+    // MOTOR_IGNORE_MAX to full scale needs no prerequisite: there is no value of the
+    // offset for which the two can disagree.
+    float limit = (float)(MOTOR_MAX_PULSE - Motor_Get_Ignore_Pulse(motor_id));
 
     if (pid->pwm_output > limit)  pid->pwm_output = limit;
     if (pid->pwm_output < -limit) pid->pwm_output = -limit;
@@ -101,14 +109,7 @@ float PID_Location_Calc(pid_t *pid, float actual_val)
 {
 	/*Compute the error between target and actual value*/
     pid->err = pid->target_val - actual_val;
-  
-    /* Limit the closed-loop dead zone */
-    if((pid->err >= -40) && (pid->err <= 40))
-    {
-        pid->err = 0;
-        pid->integral = 0;
-    }
-    
+
     /* Integral separation: drop the integral action when the error is large */
     if (pid->err > -1500 && pid->err < 1500)
     {
@@ -147,7 +148,7 @@ void PID_Calc_Motor(motor_data_t* motor)
     
     for (i = 0; i < MAX_MOTOR; i++)
     {
-        motor->speed_pwm[i] = PID_Incre_Calc(&pid_motor[i], motor->speed_mm_s[i]);
+        motor->speed_pwm[i] = PID_Incre_Calc(&pid_motor[i], i, motor->speed_mm_s[i]);
     }
 }
 
@@ -155,7 +156,7 @@ void PID_Calc_Motor(motor_data_t* motor)
 float PID_Calc_One_Motor(uint8_t motor_id, float now_speed)
 {
     if (motor_id >= MAX_MOTOR) return 0; 
-    return PID_Incre_Calc(&pid_motor[motor_id], now_speed);
+    return PID_Incre_Calc(&pid_motor[motor_id], motor_id, now_speed);
 }
 
 // Set PID parameters, motor_id=4 sets all, =0123 sets the PID parameters of the corresponding motor.
