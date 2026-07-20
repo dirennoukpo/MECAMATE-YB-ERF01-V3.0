@@ -39,10 +39,20 @@ void Fourwheel_Ctrl(int16_t V_x, int16_t V_y, int16_t V_z, uint8_t adjust)
         return;
     }
 
-    speed_L1_setup = speed_fb - speed_spin;
-    speed_L2_setup = speed_fb - speed_spin;
-    speed_R1_setup = speed_fb + speed_spin;
-    speed_R2_setup = speed_fb + speed_spin;
+    // THE L/R NAMES BELOW ARE MISLEADING -- keep them (portage), but read them as channels:
+    //   speed_L1_setup -> M1 = rear-RIGHT     speed_R1_setup -> M3 = rear-LEFT
+    //   speed_L2_setup -> M2 = front-RIGHT    speed_R2_setup -> M4 = front-LEFT
+    // Measured on the robot 20/07/2026; bsp_motor.h's "L1 L2 R1 R2" comment is wrong.
+    //
+    // So the RIGHT pair must take +spin and the LEFT pair -spin for a positive V_z to turn
+    // the robot counter-clockwise (REP-103: +yaw = left). The stock grouping did the mirror,
+    // i.e. +V_z pivoted RIGHT. That mattered as soon as a host heading PID closed its loop
+    // through here: the reported Vz is now REP-103-correct (app_motion.c), so an inverted
+    // command would have made the loop POSITIVE feedback and diverge.
+    speed_L1_setup = speed_fb + speed_spin;   // M1, RIGHT
+    speed_L2_setup = speed_fb + speed_spin;   // M2, RIGHT
+    speed_R1_setup = speed_fb - speed_spin;   // M3, LEFT
+    speed_R2_setup = speed_fb - speed_spin;   // M4, LEFT
 
     if (speed_L1_setup > 1000) speed_L1_setup = 1000;
     if (speed_L1_setup < -1000) speed_L1_setup = -1000;

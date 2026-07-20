@@ -244,6 +244,18 @@ void Encoder_Update_Count(void)
 		// g_Encoder_M4_Now += Encoder_Read_CNT(MOTOR_ID_M4);
 		g_Encoder_M4_Now -= Encoder_Read_CNT(MOTOR_ID_M4);
 	}
+	// CAR_FOURWHEEL uses Yahboom's DIFFERENTIAL harness, mirror of the mecanum one below.
+	// Signs flipped vs that branch, in lockstep with the flip in Motor_Set_Pwm -- see the
+	// long note there. Both must move together or the PID gets positive feedback.
+	// Measured 19/07/2026: with the mecanum signs a positive command drove all four wheels
+	// backward while their encoders still counted up.
+	else if (Motion_Get_Car_Type() == CAR_FOURWHEEL)
+	{
+		g_Encoder_M1_Now -= Encoder_Read_CNT(MOTOR_ID_M1);
+		g_Encoder_M2_Now += Encoder_Read_CNT(MOTOR_ID_M2);
+		g_Encoder_M3_Now += Encoder_Read_CNT(MOTOR_ID_M3);
+		g_Encoder_M4_Now -= Encoder_Read_CNT(MOTOR_ID_M4);
+	}
 	// Other car types
 	else
 	{

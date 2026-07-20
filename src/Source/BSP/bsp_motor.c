@@ -157,6 +157,22 @@ void Motor_Stop(uint8_t brake)
 void Motor_Set_Pwm(uint8_t id, int16_t speed)
 {
     int16_t pulse = Motor_Ignore_Dead_Zone(id, speed);
+
+    // CAR_FOURWHEEL is wired to Yahboom's DIFFERENTIAL harness, which is the mirror of
+    // the mecanum one the switch below was written for. Measured 19/07/2026 on the final
+    // robot: with the stock signs, a positive command drove all four wheels BACKWARD.
+    //
+    // This flip and the CAR_FOURWHEEL branch of Encoder_Update_Count MUST move together.
+    // Flipping only the command would leave the encoder counting the old way, so a
+    // positive command would produce a negative measured speed -- POSITIVE FEEDBACK, and
+    // the velocity PID would run away instead of regulating. Flipping both keeps the
+    // invariant "command + -> wheel drives forward -> encoder counts up".
+    //
+    // Applied after the dead-zone offset so the offset reverses with it: the magnitude
+    // (command + ignore) is preserved, only the direction changes.
+    if (Motion_Get_Car_Type() == CAR_FOURWHEEL)
+        pulse = -pulse;
+
     // Limit the input
     if (pulse >= MOTOR_MAX_PULSE)
         pulse = MOTOR_MAX_PULSE;

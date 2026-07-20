@@ -324,7 +324,16 @@ void Motion_Get_Speed(car_data_t* car)
     {
         car->Vx = (speed_mm[0] + speed_mm[1] + speed_mm[2] + speed_mm[3]) / 4;
         car->Vy = 0;
-        car->Vz = -(speed_mm[0] + speed_mm[1] - speed_mm[2] - speed_mm[3]) / 4.0f / robot_APB * 1000;
+        // WHEEL ORDER IS NOT WHAT bsp_motor.h's "L1 L2 R1 R2" comment claims. Measured on
+        // the final robot 19/07/2026, each motor driven alone:
+        //     M1 = rear-RIGHT   M2 = front-RIGHT   M3 = rear-LEFT   M4 = front-LEFT
+        // so speed_mm[0],[1] are the RIGHT side and [2],[3] the LEFT -- the mirror of what
+        // this file assumed. With the stock grouping the reported yaw rate came out with the
+        // WRONG SIGN, which would fight the IMU gyro inside the host EKF (both feed the same
+        // yaw state, so opposite signs make the filter diverge rather than average).
+        // REP-103: z up, yaw positive counter-clockwise, i.e. omega = (v_right - v_left)/track.
+        car->Vz = -(speed_mm[2] + speed_mm[3] - speed_mm[0] - speed_mm[1]) / 4.0f / robot_APB * 1000;
+        //          └──── LEFT (M3,M4) ────┘   └──── RIGHT (M1,M2) ────┘
         break;
     }
     case CAR_ACKERMAN:
